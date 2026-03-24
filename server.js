@@ -3,7 +3,6 @@ const express = require('express');
 const path = require('path');
 
 const app = express();
-// Lade den Port aus der .env Datei (Fallback auf 3002)
 const PORT = process.env.PORT || 3002;
 
 const ENDPOINTS = [
@@ -40,43 +39,81 @@ async function fetchAllGermany() {
     for (const url of ENDPOINTS) {
         try {
             const response = await fetch(url);
-            if (response.ok) {
-                const warnings = await response.json();
-                warnings.forEach(warning => {
-                    const warn_id = warning.id || "";
-                    if (!warn_id) return;
+            if (!response.ok) continue;
+            
+            const warnings = await response.json();
+            
+            // Wir gehen jede gefundene Warnung einzeln durch
+            for (const warning of warnings) {
+                const warn_id = warning.id || "";
+                if (!warn_id) continue;
 
-                    let state_name = "Unbekanntes Gebiet";
-                    if (warn_id.includes("DE-")) {
-                        const parts = warn_id.split("DE-");
-                        if (parts.length > 1) {
-                            const state_code = parts[1].substring(0, 2);
-                            state_name = STATE_MAPPING[state_code] || "Unbekanntes Gebiet";
+                // Bundesland ermitteln
+                let state_name = "Unbekanntes Gebiet";
+                if (warn_id.includes("DE-")) {
+                    const parts = warn_id.split("DE-");
+                    if (parts.length > 1) {
+                        const state_code = parts[1].substring(0, 2);
+                        state_name = STATE_MAPPING[state_code] || "Unbekanntes Gebiet";
+                    }
+                }
+
+                const headline = warning.i18nTitle?.de || "Warnung";
+                const severity = warning.severity || "Unknown";
+
+                // --- NEU: Detailabfrage für jede einzelne Warnung ---
+                let realDescription = "Keine detaillierte Beschreibung verfügbar.";
+                let realInstruction = "";
+                let areasText = "Gesamtes Gebiet / Siehe Karte";
+
+                try {
+                    // Wir holen uns das vollständige Dossier zu dieser spezifischen Warnungs-ID
+                    const detailRes = await fetch(`https://nina.api.proxy.bund.dev/api31/warnings/${warn_id}.json`);
+                    if (detailRes.ok) {
+                        const detailData = await detailRes.json();
+                        const info = detailData.info && detailData.info[0] ? detailData.info[0] : {};
+
+                        if (info.description) realDescription = info.description;
+                        if (info.instruction) realInstruction = info.instruction;
+
+                        // Betroffene Gebiete als Textliste auslesen
+                        if (info.area && info.area.length > 0) {
+                            const areaNames = info.area.map(a => a.areaDesc);
+                            areasText = areaNames.slice(0, 3).join(', ');
+                            if (areaNames.length > 3) areasText += ` und ${areaNames.length - 3} weitere`;
                         }
                     }
+                } catch (err) {
+                    console.error(`Detailabfrage für ${warn_id} fehlgeschlagen.`);
+                }
 
-                    const headline = warning.i18nTitle?.de || "Warnung";
-                    const severity = warning.severity || "Unknown";
+                // Beschreibung und Handlungsempfehlung (falls vorhanden) sauber zusammenbauen
+                let fullText = realDescription;
+                if (realInstruction) {
+                    // HTML-Zeilenumbrüche, damit es auf dem Dashboard gut lesbar bleibt
+                    fullText += `<br><br><strong>Handlungsempfehlung:</strong><br>${realInstruction}`;
+                }
 
-                    newStatus[state_name].push({
-                        id: warn_id,
-                        payload: { data: { headline, severity, description: "Bitte die NINA-App prüfen." } },
-                        info: [{ area: [{ areaDesc: "Ort siehe Karte" }] }]
-                    });
-                    totalWarnings++;
+                // Warnung in unseren Zwischenspeicher packen
+                newStatus[state_name].push({
+                    id: warn_id,
+                    payload: { data: { headline, severity, description: fullText } },
+                    info: [{ area: [{ areaDesc: areasText }] }]
                 });
+                totalWarnings++;
             }
         } catch (error) {
-            console.error(`Fehler (${url}):`, error.message);
+            console.error(`Fehler beim Abruf der Hauptliste (${url}):`, error.message);
         }
     }
     currentWarningsData = newStatus;
-    console.log(`[${new Date().toLocaleTimeString('de-DE')}] ${totalWarnings} Warnungen geladen.`);
+    console.log(`[${new Date().toLocaleTimeString('de-DE')}] ${totalWarnings} Warnungen (inkl. Details) geladen.`);
 }
 
+// Erster Start
 fetchAllGermany();
 setInterval(fetchAllGermany, POLL_INTERVAL);
 
 app.listen(PORT, () => {
-    console.log(`🚨 NINA Leitstelle Backend läuft auf http://localhost:${PORT}`);
+    console.log(`🚨 NINA Leitstelle Backend läuft auf Port ${PORT}`);
 });
