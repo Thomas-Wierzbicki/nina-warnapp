@@ -20,6 +20,11 @@ const STATE_MAPPING = {
     "TH": "Thüringen", "DE": "Deutschlandweit"
 };
 
+// Gewichtung für die Sortierung im Backend
+const SEVERITY_WEIGHTS = {
+    "Extreme": 4, "Severe": 3, "Moderate": 2, "Minor": 1, "Unknown": 0
+};
+
 const POLL_INTERVAL = 300 * 1000; 
 let currentWarningsData = {};     
 
@@ -31,24 +36,21 @@ app.get('/nina_current.json', (req, res) => {
 
 async function fetchAllGermany() {
     console.log(`[${new Date().toLocaleTimeString('de-DE')}] NINA API Abfrage gestartet...`);
-    let newStatus = {};
-    Object.values(STATE_MAPPING).forEach(state => newStatus[state] = []);
-    newStatus["Unbekanntes Gebiet"] = [];
+    let rawStatus = {};
+    Object.values(STATE_MAPPING).forEach(state => rawStatus[state] = []);
+    rawStatus["Unbekanntes Gebiet"] = [];
     let totalWarnings = 0;
 
     for (const url of ENDPOINTS) {
         try {
             const response = await fetch(url);
             if (!response.ok) continue;
-            
             const warnings = await response.json();
             
-            // Wir gehen jede gefundene Warnung einzeln durch
             for (const warning of warnings) {
                 const warn_id = warning.id || "";
                 if (!warn_id) continue;
 
-                // Bundesland ermitteln
                 let state_name = "Unbekanntes Gebiet";
                 if (warn_id.includes("DE-")) {
                     const parts = warn_id.split("DE-");
@@ -61,22 +63,17 @@ async function fetchAllGermany() {
                 const headline = warning.i18nTitle?.de || "Warnung";
                 const severity = warning.severity || "Unknown";
 
-                // --- NEU: Detailabfrage für jede einzelne Warnung ---
                 let realDescription = "Keine detaillierte Beschreibung verfügbar.";
                 let realInstruction = "";
                 let areasText = "Gesamtes Gebiet / Siehe Karte";
 
                 try {
-                    // Wir holen uns das vollständige Dossier zu dieser spezifischen Warnungs-ID
                     const detailRes = await fetch(`https://nina.api.proxy.bund.dev/api31/warnings/${warn_id}.json`);
                     if (detailRes.ok) {
                         const detailData = await detailRes.json();
                         const info = detailData.info && detailData.info[0] ? detailData.info[0] : {};
-
                         if (info.description) realDescription = info.description;
                         if (info.instruction) realInstruction = info.instruction;
-
-                        // Betroffene Gebiete als Textliste auslesen
                         if (info.area && info.area.length > 0) {
                             const areaNames = info.area.map(a => a.areaDesc);
                             areasText = areaNames.slice(0, 3).join(', ');
@@ -87,30 +84,51 @@ async function fetchAllGermany() {
                     console.error(`Detailabfrage für ${warn_id} fehlgeschlagen.`);
                 }
 
-                // Beschreibung und Handlungsempfehlung (falls vorhanden) sauber zusammenbauen
                 let fullText = realDescription;
-                if (realInstruction) {
-                    // HTML-Zeilenumbrüche, damit es auf dem Dashboard gut lesbar bleibt
-                    fullText += `<br><br><strong>Handlungsempfehlung:</strong><br>${realInstruction}`;
-                }
+                if (realInstruction) fullText += `<br><br><strong>Handlungsempfehlung:</strong><br>${realInstruction}`;
 
-                // Warnung in unseren Zwischenspeicher packen
-                newStatus[state_name].push({
+                rawStatus[state_name].push({
                     id: warn_id,
-                    payload: { data: { headline, severity, description: fullText } },
-                    info: [{ area: [{ areaDesc: areasText }] }]
+                    headline: headline,
+                    severity: severity,
+                    description: fullText,
+                    areas: areasText
                 });
                 totalWarnings++;
             }
         } catch (error) {
-            console.error(`Fehler beim Abruf der Hauptliste (${url}):`, error.message);
+            console.error(`Fehler beim Abruf (${url}):`, error.message);
         }
     }
-    currentWarningsData = newStatus;
-    console.log(`[${new Date().toLocaleTimeString('de-DE')}] ${totalWarnings} Warnungen (inkl. Details) geladen.`);
+
+    // --- NEU: Daten im Backend intelligent aufbereiten und sortieren ---
+    let processedData = {
+        total: totalWarnings,
+        states: {}
+    };
+
+    for (const [state, warnings] of Object.entries(rawStatus)) {
+        if (warnings.length > 0) {
+            // Warnungen nach Wichtigkeit sortieren (Extreme zuerst)
+            warnings.sort((a, b) => {
+                const weightA = SEVERITY_WEIGHTS[a.severity] || 0;
+                const weightB = SEVERITY_WEIGHTS[b.severity] || 0;
+                return weightB - weightA;
+            });
+
+            // Da sortiert ist, steht die höchste Warnstufe automatisch ganz oben an Stelle [0]
+            processedData.states[state] = {
+                highestSeverity: warnings[0].severity,
+                count: warnings.length,
+                warnings: warnings
+            };
+        }
+    }
+
+    currentWarningsData = processedData;
+    console.log(`[${new Date().toLocaleTimeString('de-DE')}] ${totalWarnings} Warnungen verarbeitet und sortiert.`);
 }
 
-// Erster Start
 fetchAllGermany();
 setInterval(fetchAllGermany, POLL_INTERVAL);
 

@@ -9,49 +9,17 @@
 
     <style>
         :root {
-            --bg-color: #121212;
-            --card-bg: #1e1e1e;
-            --text-main: #e0e0e0;
-            --text-muted: #aaaaaa;
-            --color-minor: #fbc02d;    /* Gelb */
-            --color-moderate: #f57c00; /* Orange */
-            --color-severe: #d32f2f;   /* Rot */
-            --color-extreme: #7b1fa2;  /* Lila */
-            --color-unknown: #757575;  /* Grau */
+            --bg-color: #121212; --card-bg: #1e1e1e; --text-main: #e0e0e0; --text-muted: #aaaaaa;
+            --color-minor: #fbc02d; --color-moderate: #f57c00; --color-severe: #d32f2f;
+            --color-extreme: #7b1fa2; --color-unknown: #757575;
         }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            margin: 0;
-            padding: 20px;
-        }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #333;
-            padding-bottom: 10px;
-        }
-
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
         h1 { margin: 0; font-size: 1.8rem; }
         #last-update { color: var(--text-muted); font-size: 0.9rem; }
 
-        /* Styling für die Karte */
-        #map {
-            height: 450px;
-            width: 100%;
-            border-radius: 8px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-            border: 1px solid #333;
-            z-index: 1; 
-        }
-
-        /* Styling für die Map-Popups im Dark Mode */
+        #map { height: 450px; width: 100%; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); border: 1px solid #333; z-index: 1; }
         .leaflet-popup-content-wrapper { background-color: var(--card-bg); color: var(--text-main); border-radius: 8px; }
         .leaflet-popup-tip { background-color: var(--card-bg); }
         .leaflet-popup-content h4 { margin: 0 0 5px 0; border-bottom: 1px solid #444; padding-bottom: 5px; }
@@ -59,21 +27,10 @@
 
         .state-section { margin-bottom: 40px; }
         .state-title { font-size: 1.4rem; margin-bottom: 15px; color: #fff; border-bottom: 2px solid #333; padding-bottom: 5px; }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
-        }
-
-        .card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            border-top: 5px solid var(--color-unknown);
-            display: flex; flex-direction: column;
-        }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
+        
+        .card { background-color: var(--card-bg); border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border-top: 5px solid var(--color-unknown); display: flex; flex-direction: column; transition: transform 0.2s ease; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.5); }
 
         .severity-Minor { border-top-color: var(--color-minor); }
         .severity-Moderate { border-top-color: var(--color-moderate); }
@@ -81,19 +38,17 @@
         .severity-Extreme { border-top-color: var(--color-extreme); }
 
         .card h3 { margin: 0 0 10px 0; font-size: 1.2rem; line-height: 1.3; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; margin-bottom: 15px; text-transform: uppercase; background-color: #333; }
         
-        .badge {
-            display: inline-block; padding: 3px 8px; border-radius: 4px;
-            font-size: 0.8rem; font-weight: bold; margin-bottom: 15px;
-            text-transform: uppercase; background-color: #333;
-        }
-
         .severity-Minor .badge { color: var(--color-minor); }
         .severity-Moderate .badge { color: var(--color-moderate); }
         .severity-Severe .badge { color: var(--color-severe); }
         .severity-Extreme .badge { color: var(--color-extreme); }
 
-        .description { font-size: 0.95rem; line-height: 1.5; flex-grow: 1; margin-bottom: 15px; color: #ccc; }
+        .description { font-size: 0.95rem; line-height: 1.5; color: #ccc; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 5px; }
+        .card:hover .description { display: block; }
+        .hover-hint { font-size: 0.8rem; color: #888; font-style: italic; }
+        .card:hover .hover-hint { display: none; }
         .all-clear { text-align: center; padding: 50px; background: var(--card-bg); border-radius: 8px; color: #4caf50; font-size: 1.2rem; }
     </style>
 </head>
@@ -105,25 +60,19 @@
     </header>
 
     <div id="map"></div>
-
     <div id="dashboard"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        // 1. Karte initialisieren
         const map = L.map('map').setView([51.1657, 10.4515], 6);
-
-        // 2. Dunkles Karten-Design von CartoDB laden
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-            subdomains: 'abcd',
-            maxZoom: 19
+            subdomains: 'abcd', maxZoom: 19
         }).addTo(map);
 
         const markersLayer = L.layerGroup().addTo(map);
 
-        // Geografische Zentren der Bundesländer für die Punkte auf der Karte
         const stateCoords = {
             "Baden-Württemberg": [48.6616, 9.0392], "Bayern": [48.7904, 11.4979],
             "Berlin": [52.5200, 13.4050], "Brandenburg": [52.4125, 12.5316],
@@ -136,101 +85,68 @@
         };
 
         const severityConfig = {
-            "Extreme":  { color: "#7b1fa2", weight: 4 }, 
-            "Severe":   { color: "#d32f2f", weight: 3 }, 
-            "Moderate": { color: "#f57c00", weight: 2 }, 
-            "Minor":    { color: "#fbc02d", weight: 1 }, 
-            "Unknown":  { color: "#757575", weight: 0 }  
+            "Extreme":  { color: "#7b1fa2" }, "Severe":   { color: "#d32f2f" }, 
+            "Moderate": { color: "#f57c00" }, "Minor":    { color: "#fbc02d" }, 
+            "Unknown":  { color: "#757575" }  
         };
 
         async function loadWarnings() {
             try {
-                // Abruf der Daten vom eigenen Node.js Backend
                 const response = await fetch('nina_current.json?t=' + new Date().getTime());
                 if (!response.ok) throw new Error("Netzwerkfehler");
                 
                 const data = await response.json();
                 const dashboard = document.getElementById('dashboard');
-                
                 dashboard.innerHTML = ''; 
                 markersLayer.clearLayers(); 
 
-                let totalWarnings = 0;
+                const now = new Date();
+                document.getElementById('last-update').innerText = `Letztes Update: ${now.toLocaleTimeString('de-DE')} Uhr | Gesamt: ${data.total} Warnungen`;
 
-                for (const [stateName, warnings] of Object.entries(data)) {
-                    if (warnings.length > 0) {
-                        totalWarnings += warnings.length;
-
-                        // --- MAP LOGIK ---
-                        if (stateCoords[stateName]) {
-                            let highestSeverity = "Unknown";
-                            let maxWeight = -1;
-                            let popupList = "";
-
-                            warnings.forEach(w => {
-                                const sev = w.payload?.data?.severity || "Unknown";
-                                const title = w.payload?.data?.headline || w.i18nTitle?.de || "Warnung";
-                                
-                                popupList += `<li>${title}</li>`;
-
-                                const weight = severityConfig[sev] ? severityConfig[sev].weight : 0;
-                                if (weight > maxWeight) {
-                                    maxWeight = weight;
-                                    highestSeverity = sev;
-                                }
-                            });
-
-                            const markerColor = severityConfig[highestSeverity].color;
-
-                            const circle = L.circleMarker(stateCoords[stateName], {
-                                radius: 12, fillColor: markerColor, color: markerColor,
-                                weight: 2, opacity: 0.8, fillOpacity: 0.5
-                            });
-
-                            circle.bindPopup(`<h4>${stateName}</h4><strong>${warnings.length} aktive Warnung(en):</strong><ul>${popupList}</ul>`);
-                            circle.addTo(markersLayer);
-                        }
-
-                        // --- DASHBOARD KARTEN LOGIK ---
-                        const section = document.createElement('div');
-                        section.className = 'state-section';
-                        
-                        const title = document.createElement('h2');
-                        title.className = 'state-title';
-                        title.innerText = `${stateName} (${warnings.length} Warnungen)`;
-                        section.appendChild(title);
-
-                        const grid = document.createElement('div');
-                        grid.className = 'grid';
-
-                        warnings.forEach(w => {
-                            const payloadData = w.payload?.data || {};
-                            const info = w.info && w.info[0] ? w.info[0] : {};
-                            
-                            const headline = payloadData.headline || w.i18nTitle?.de || "Warnung ohne Titel";
-                            const severity = payloadData.severity || info.severity || "Unknown";
-                            const description = payloadData.description || "Bitte die NINA-App für Details prüfen.";
-
-                            const card = document.createElement('div');
-                            card.className = `card severity-${severity}`;
-                            card.innerHTML = `
-                                <h3>${headline}</h3>
-                                <div><span class="badge">${severity}</span></div>
-                                <div class="description">${description}</div>
-                            `;
-                            grid.appendChild(card);
-                        });
-
-                        section.appendChild(grid);
-                        dashboard.appendChild(section);
-                    }
+                if (data.total === 0) {
+                    dashboard.innerHTML = '<div class="all-clear">✅ Aktuell liegen keine Warnungen für Deutschland vor.</div>';
+                    return;
                 }
 
-                const now = new Date();
-                document.getElementById('last-update').innerText = `Letztes Update: ${now.toLocaleTimeString('de-DE')} Uhr | Gesamt: ${totalWarnings} Warnungen`;
+                // Durch die vom Backend vorbereiteten Bundesländer schleifen
+                for (const [stateName, stateInfo] of Object.entries(data.states)) {
+                    
+                    // 1. Karte zeichnen (Farbe kommt direkt vom Backend!)
+                    if (stateCoords[stateName]) {
+                        let popupList = stateInfo.warnings.map(w => `<li>${w.headline}</li>`).join('');
+                        const markerColor = severityConfig[stateInfo.highestSeverity]?.color || "#757575";
+                        
+                        const circle = L.circleMarker(stateCoords[stateName], {
+                            radius: 12, fillColor: markerColor, color: markerColor,
+                            weight: 2, opacity: 0.8, fillOpacity: 0.5
+                        });
+                        circle.bindPopup(`<h4>${stateName}</h4><strong>${stateInfo.count} aktive Warnung(en):</strong><ul>${popupList}</ul>`);
+                        circle.addTo(markersLayer);
+                    }
 
-                if (totalWarnings === 0) {
-                    dashboard.innerHTML = '<div class="all-clear">✅ Aktuell liegen keine Warnungen für Deutschland vor.</div>';
+                    // 2. Dashboard Sektion bauen
+                    const section = document.createElement('div');
+                    section.className = 'state-section';
+                    section.innerHTML = `<h2 class="state-title">${stateName} (${stateInfo.count} Warnungen)</h2>`;
+                    
+                    const grid = document.createElement('div');
+                    grid.className = 'grid';
+
+                    // Warnungen einfügen (sind bereits vom Backend perfekt sortiert!)
+                    stateInfo.warnings.forEach(w => {
+                        const card = document.createElement('div');
+                        card.className = `card severity-${w.severity}`;
+                        card.innerHTML = `
+                            <h3>${w.headline}</h3>
+                            <div><span class="badge">${w.severity}</span> <small style="color:#888;">${w.areas}</small></div>
+                            <div class="description">${w.description}</div>
+                            <div class="hover-hint">Hover für Details...</div>
+                        `;
+                        grid.appendChild(card);
+                    });
+
+                    section.appendChild(grid);
+                    dashboard.appendChild(section);
                 }
 
             } catch (error) {
@@ -239,7 +155,6 @@
             }
         }
 
-        // Lade die Daten sofort und dann alle 60 Sekunden
         loadWarnings();
         setInterval(loadWarnings, 60000);
     </script>
