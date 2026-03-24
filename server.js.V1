@@ -34,7 +34,6 @@ app.get('/nina_current.json', (req, res) => {
     let filteredData = {};
     
     for (const [state, warnings] of Object.entries(currentWarningsData)) {
-        // HIER WIRD NICHTS MEHR WEGGEWORFEN! 
         filteredData[state] = warnings.filter(w => {
             const sev = w.payload?.data?.severity || "Unknown";
             const weight = severityWeights[sev] !== undefined ? severityWeights[sev] : 0;
@@ -45,8 +44,11 @@ app.get('/nina_current.json', (req, res) => {
     res.json(filteredData);
 });
 
+// ABSOLUT ROBUSTER PARSER (Fängt alle API-Eigenheiten ab)
 function parsePolygons(infoData) {
     let polygons = [];
+    
+    // Manche Warnungen sind in Arrays versteckt, manche direkt im Objekt
     let infoArray = Array.isArray(infoData) ? infoData : (infoData ? [infoData] : []);
     if (infoArray.length === 0) return polygons;
     
@@ -54,11 +56,16 @@ function parsePolygons(infoData) {
         if (info.area && Array.isArray(info.area)) {
             info.area.forEach(area => {
                 if (area.polygon) {
+                    // DER MAGISCHE FIX: Wir zwingen die Daten immer in ein Array, 
+                    // egal ob die Behörde einen String oder ein Array geschickt hat!
                     let polyArray = Array.isArray(area.polygon) ? area.polygon : [area.polygon];
+                    
                     polyArray.forEach(polyStr => {
                         if (typeof polyStr !== 'string') return;
+                        
                         const pairs = polyStr.trim().split(/\s+/);
                         const coords = [];
+                        
                         pairs.forEach(pair => {
                             const parts = pair.split(',');
                             if (parts.length === 2) {
@@ -69,6 +76,8 @@ function parsePolygons(infoData) {
                                 }
                             }
                         });
+                        
+                        // Leaflet braucht für eine Fläche mindestens 3 Eckpunkte
                         if (coords.length >= 3) {
                             polygons.push(coords);
                         }
@@ -82,14 +91,11 @@ function parsePolygons(infoData) {
 
 async function fetchAllGermany() {
     console.log(`[${new Date().toLocaleTimeString('de-DE')}] NINA API Abfrage gestartet...`);
-    let rawStatus = {};
+    let newStatus = {};
     let currentKeys = new Set();
-    
-    // NEU: Schönerer Name für Warnungen ohne klares Bundesland
-    Object.values(STATE_MAPPING).forEach(state => rawStatus[state] = []);
-    rawStatus["Überregional / Ohne genaue Ortsangabe"] = [];
-    
-    let totalRawWarnings = 0;
+    Object.values(STATE_MAPPING).forEach(state => newStatus[state] = []);
+    newStatus["Unbekanntes Gebiet"] = [];
+    let totalWarnings = 0;
 
     for (const url of ENDPOINTS) {
         try {
@@ -101,12 +107,12 @@ async function fetchAllGermany() {
                     const warn_id = warning.id || "";
                     if (!warn_id) continue;
 
-                    let state_name = "Überregional / Ohne genaue Ortsangabe";
+                    let state_name = "Unbekanntes Gebiet";
                     if (warn_id.includes("DE-")) {
                         const parts = warn_id.split("DE-");
                         if (parts.length > 1) {
                             const state_code = parts[1].substring(0, 2);
-                            state_name = STATE_MAPPING[state_code] || "Überregional / Ohne genaue Ortsangabe";
+                            state_name = STATE_MAPPING[state_code] || "Unbekanntes Gebiet";
                         }
                     }
 
@@ -115,40 +121,39 @@ async function fetchAllGermany() {
                     
                     let description = "Keine Details verfügbar.";
                     let polygons = [];
-                    let sentDate = ""; // Hier speichern wir das Datum
 
                     if (warningDetailsCache[warn_id]) {
                         description = warningDetailsCache[warn_id].description;
                         polygons = warningDetailsCache[warn_id].polygons;
-                        sentDate = warningDetailsCache[warn_id].sent;
                     } else {
                         try {
                             const detailRes = await fetch(`https://nina.api.proxy.bund.dev/api31/warnings/${warn_id}.json`);
                             if (detailRes.ok) {
                                 const detailData = await detailRes.json();
-                                let infoArray = detailData.info || (Array.isArray(detailData) && detailData.length > 0 ? detailData[0].info : []);
-                                const info = infoArray && infoArray.length > 0 ? infoArray[0] : {};
                                 
+                                // FIX: Sicherstellen, dass wir das "info"-Array finden, egal wie die API es verpackt
+                                let infoArray = detailData.info || (Array.isArray(detailData) && detailData.length > 0 ? detailData[0].info : []);
+                                
+                                const info = infoArray && infoArray.length > 0 ? infoArray[0] : {};
                                 description = info.description || info.headline || "Bitte die NINA-App für Details prüfen.";
+                                
+                                // Polygone auslesen
                                 polygons = parsePolygons(infoArray);
                                 
-                                // NEU: Datum verlässlich aus der Detail-API ziehen!
-                                sentDate = detailData.sent || info.onset || info.effective || warning.sent || "";
-                                
-                                warningDetailsCache[warn_id] = { description, polygons, sent: sentDate };
+                                warningDetailsCache[warn_id] = { description, polygons };
                             }
                         } catch (err) {
-                            console.warn(`Detail-Text für ${warn_id} konnte nicht geladen werden.`);
+                            console.warn(`Detail-Text und Polygone für ${warn_id} konnten nicht geladen werden.`);
                         }
                     }
                     currentKeys.add(warn_id);
 
-                    rawStatus[state_name].push({
+                    newStatus[state_name].push({
                         id: warn_id,
-                        payload: { data: { headline, severity, description, sent: sentDate } },
+                        payload: { data: { headline, severity, description } },
                         polygons: polygons 
                     });
-                    totalRawWarnings++;
+                    totalWarnings++;
                 }
             }
         } catch (error) {
@@ -160,44 +165,13 @@ async function fetchAllGermany() {
         if (!currentKeys.has(key)) delete warningDetailsCache[key];
     }
 
-    let deduplicatedStatus = {};
-    let totalSummarizedWarnings = 0;
-
-    for (const state in rawStatus) {
-        let uniqueWarnings = new Map();
-        
-        rawStatus[state].forEach(w => {
-            const headline = w.payload.data.headline;
-            const desc = w.payload.data.description;
-            const sev = w.payload.data.severity;
-            const key = `${headline}|${desc}`;
-            
-            if (uniqueWarnings.has(key)) {
-                let existing = uniqueWarnings.get(key);
-                if (w.polygons && w.polygons.length > 0) {
-                    existing.polygons.push(...w.polygons);
-                }
-                const weightExisting = severityWeights[existing.payload.data.severity] || 0;
-                const weightNew = severityWeights[sev] || 0;
-                if (weightNew > weightExisting) {
-                    existing.payload.data.severity = sev;
-                }
-            } else {
-                uniqueWarnings.set(key, { ...w, polygons: [...w.polygons] });
-            }
-        });
-        
-        deduplicatedStatus[state] = Array.from(uniqueWarnings.values());
-        totalSummarizedWarnings += deduplicatedStatus[state].length;
-    }
-
-    currentWarningsData = deduplicatedStatus;
-    console.log(`[${new Date().toLocaleTimeString('de-DE')}] ${totalRawWarnings} Roh-Warnungen geladen und zu ${totalSummarizedWarnings} kompakten Warnungen zusammengefasst.`);
+    currentWarningsData = newStatus;
+    console.log(`[${new Date().toLocaleTimeString('de-DE')}] ${totalWarnings} Warnungen geladen.`);
 }
 
 fetchAllGermany();
 setInterval(fetchAllGermany, POLL_INTERVAL);
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚨 NINA Leitstelle Backend läuft auf Port ${PORT}`);
+app.listen(PORT, () => {
+    console.log(`🚨 NINA Leitstelle Backend läuft auf http://localhost:${PORT}`);
 });
