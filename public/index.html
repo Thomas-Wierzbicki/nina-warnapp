@@ -9,53 +9,76 @@
 
     <style>
         :root {
-            --bg-color: #121212; --card-bg: #1e1e1e; --text-main: #e0e0e0; --text-muted: #aaaaaa;
-            --color-minor: #fbc02d; --color-moderate: #f57c00; --color-severe: #d32f2f;
-            --color-extreme: #7b1fa2; --color-unknown: #757575;
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-main: #e0e0e0;
+            --text-muted: #aaaaaa;
+            --color-minor: #fbc02d;
+            --color-moderate: #f57c00;
+            --color-severe: #d32f2f;
+            --color-extreme: #7b1fa2;
+            --color-unknown: #757575;
         }
 
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 20px; }
+        
         header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
         h1 { margin: 0; font-size: 1.8rem; }
         #last-update { color: var(--text-muted); font-size: 0.9rem; }
 
+        /* Map Styling */
         #map { height: 450px; width: 100%; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); border: 1px solid #333; z-index: 1; }
         .leaflet-popup-content-wrapper { background-color: var(--card-bg); color: var(--text-main); border-radius: 8px; }
         .leaflet-popup-tip { background-color: var(--card-bg); }
         .leaflet-popup-content h4 { margin: 0 0 5px 0; border-bottom: 1px solid #444; padding-bottom: 5px; }
         .leaflet-popup-content ul { margin: 0; padding-left: 15px; font-size: 0.9rem; }
 
+        /* Dashboard Struktur */
         .state-section { margin-bottom: 40px; }
-        .state-title { font-size: 1.4rem; margin-bottom: 15px; color: #fff; border-bottom: 2px solid #333; padding-bottom: 5px; }
+        .state-title { font-size: 1.4rem; margin-bottom: 15px; color: #fff; border-bottom: 2px solid #333; padding-bottom: 5px; display: flex; align-items: center; gap: 15px; }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
         
+        /* Karten (Cards) */
         .card { background-color: var(--card-bg); border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border-top: 5px solid var(--color-unknown); display: flex; flex-direction: column; transition: transform 0.2s ease; }
         .card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.5); }
+        .card h3 { margin: 0 0 10px 0; font-size: 1.2rem; line-height: 1.3; }
 
+        /* Farbige Ränder je nach Warnstufe */
         .severity-Minor { border-top-color: var(--color-minor); }
         .severity-Moderate { border-top-color: var(--color-moderate); }
         .severity-Severe { border-top-color: var(--color-severe); }
         .severity-Extreme { border-top-color: var(--color-extreme); }
 
-        .card h3 { margin: 0 0 10px 0; font-size: 1.2rem; line-height: 1.3; }
-        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; margin-bottom: 15px; text-transform: uppercase; background-color: #333; }
+        /* Badges (NINA & WBI) */
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; margin-bottom: 15px; text-transform: uppercase; background-color: #333; margin-right: 5px;}
         
-        .severity-Minor .badge { color: var(--color-minor); }
-        .severity-Moderate .badge { color: var(--color-moderate); }
-        .severity-Severe .badge { color: var(--color-severe); }
-        .severity-Extreme .badge { color: var(--color-extreme); }
+        /* NINA Textfarben */
+        .severity-Minor .badge.nina-badge { color: var(--color-minor); }
+        .severity-Moderate .badge.nina-badge { color: var(--color-moderate); }
+        .severity-Severe .badge.nina-badge { color: var(--color-severe); }
+        .severity-Extreme .badge.nina-badge { color: var(--color-extreme); }
 
+        /* DWD Waldbrand Index (WBI) Hintergrundfarben */
+        .wbi-badge { color: #fff; margin-bottom: 0; font-size: 0.9rem; }
+        .wbi-1 { background-color: #4caf50; } /* Grün */
+        .wbi-2 { background-color: #8bc34a; } /* Hellgrün */
+        .wbi-3 { background-color: #ffeb3b; color: #000; } /* Gelb */
+        .wbi-4 { background-color: #ff9800; } /* Orange */
+        .wbi-5 { background-color: #d32f2f; } /* Rot */
+
+        /* Textkürzung & Hover Logik */
         .description { font-size: 0.95rem; line-height: 1.5; color: #ccc; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 5px; }
         .card:hover .description { display: block; }
         .hover-hint { font-size: 0.8rem; color: #888; font-style: italic; }
         .card:hover .hover-hint { display: none; }
+        
         .all-clear { text-align: center; padding: 50px; background: var(--card-bg); border-radius: 8px; color: #4caf50; font-size: 1.2rem; }
     </style>
 </head>
 <body>
 
     <header>
-        <h1>🚨 NINA Leitstelle</h1>
+        <h1>🚨 NINA Leitstelle & Wetterdaten</h1>
         <div id="last-update">Lade Daten...</div>
     </header>
 
@@ -65,11 +88,24 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
+        // 1. Karte initialisieren
         const map = L.map('map').setView([51.1657, 10.4515], 6);
+        
+        // Dark Mode Base Map
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
             subdomains: 'abcd', maxZoom: 19
         }).addTo(map);
+
+        // --- DWD LIVE REGENRADAR (WMS) ---
+        const dwdRadar = L.tileLayer.wms('https://maps.dwd.de/geoserver/dwd/wms', {
+            layers: 'dwd:FX-Produkt', // Aktuelles Niederschlagsradar
+            format: 'image/png',
+            transparent: true,
+            opacity: 0.5,             // Halbtransparent
+            attribution: '&copy; Deutscher Wetterdienst (DWD)'
+        });
+        dwdRadar.addTo(map);
 
         const markersLayer = L.layerGroup().addTo(map);
 
@@ -92,26 +128,28 @@
 
         async function loadWarnings() {
             try {
-                const response = await fetch('nina_current.json?t=' + new Date().getTime());
+                // Abruf der kombinierten Daten vom neuen Backend
+                const response = await fetch('dashboard_data.json?t=' + new Date().getTime());
                 if (!response.ok) throw new Error("Netzwerkfehler");
                 
                 const data = await response.json();
+                const ninaData = data.nina;
+                const wbiData = data.wbi;
+                
                 const dashboard = document.getElementById('dashboard');
                 dashboard.innerHTML = ''; 
                 markersLayer.clearLayers(); 
 
-                const now = new Date();
-                document.getElementById('last-update').innerText = `Letztes Update: ${now.toLocaleTimeString('de-DE')} Uhr | Gesamt: ${data.total} Warnungen`;
+                document.getElementById('last-update').innerText = `Letztes Update: ${data.timestamp} | NINA: ${ninaData.total} Warnungen`;
 
-                if (data.total === 0) {
-                    dashboard.innerHTML = '<div class="all-clear">✅ Aktuell liegen keine Warnungen für Deutschland vor.</div>';
+                if (ninaData.total === 0) {
+                    dashboard.innerHTML = '<div class="all-clear">✅ Aktuell liegen keine NINA-Warnungen für Deutschland vor.</div>';
                     return;
                 }
 
-                // Durch die vom Backend vorbereiteten Bundesländer schleifen
-                for (const [stateName, stateInfo] of Object.entries(data.states)) {
+                for (const [stateName, stateInfo] of Object.entries(ninaData.states)) {
                     
-                    // 1. Karte zeichnen (Farbe kommt direkt vom Backend!)
+                    // Karte zeichnen
                     if (stateCoords[stateName]) {
                         let popupList = stateInfo.warnings.map(w => `<li>${w.headline}</li>`).join('');
                         const markerColor = severityConfig[stateInfo.highestSeverity]?.color || "#757575";
@@ -124,21 +162,27 @@
                         circle.addTo(markersLayer);
                     }
 
-                    // 2. Dashboard Sektion bauen
+                    // WBI Badge generieren (nur wenn Wert > 0)
+                    const stateWbi = wbiData[stateName] || 0;
+                    let wbiHtml = "";
+                    if(stateWbi > 0) {
+                        wbiHtml = `<span class="badge wbi-badge wbi-${stateWbi}" title="DWD Waldbrandgefahrenindex">🌲 WBI: ${stateWbi}/5</span>`;
+                    }
+
+                    // Dashboard Sektion bauen
                     const section = document.createElement('div');
                     section.className = 'state-section';
-                    section.innerHTML = `<h2 class="state-title">${stateName} (${stateInfo.count} Warnungen)</h2>`;
+                    section.innerHTML = `<h2 class="state-title"><span>${stateName} (${stateInfo.count} Warnungen)</span> ${wbiHtml}</h2>`;
                     
                     const grid = document.createElement('div');
                     grid.className = 'grid';
 
-                    // Warnungen einfügen (sind bereits vom Backend perfekt sortiert!)
                     stateInfo.warnings.forEach(w => {
                         const card = document.createElement('div');
                         card.className = `card severity-${w.severity}`;
                         card.innerHTML = `
                             <h3>${w.headline}</h3>
-                            <div><span class="badge">${w.severity}</span> <small style="color:#888;">${w.areas}</small></div>
+                            <div><span class="badge nina-badge">${w.severity}</span> <small style="color:#888;">${w.areas}</small></div>
                             <div class="description">${w.description}</div>
                             <div class="hover-hint">Hover für Details...</div>
                         `;
@@ -155,6 +199,7 @@
             }
         }
 
+        // Lade die Daten sofort und dann alle 60 Sekunden
         loadWarnings();
         setInterval(loadWarnings, 60000);
     </script>
