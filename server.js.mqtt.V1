@@ -10,6 +10,8 @@ const PORT = process.env.PORT || 3002;
 const MQTT_BROKER = process.env.MQTT_BROKER || "mqtt://127.0.0.1";
 const MQTT_TOPIC = process.env.MQTT_TOPIC || "meshcom/tx";
 const MQTT_MIN_LEVEL = parseInt(process.env.MQTT_MIN_LEVEL) || 3; 
+
+// NEU: Test-Modus Schalter
 const TEST_MODE = process.env.TEST_MODE === 'true';
 // ----------------------------------------------
 
@@ -112,11 +114,7 @@ function parsePolygons(infoData) {
     return polygons;
 }
 
-// --- FUNKTION ZUM SENDEN AN MESHCOM (MIT FUNK-BREMSE) ---
-const TX_DELAY = 5000; // 5 Sekunden Pause zwischen jedem Funkspruch
-let messageQueue = []; // Das Wartezimmer für die Nachrichten
-let isSending = false; // Der "Türsteher"
-
+// --- FUNKTION ZUM SENDEN AN MESHCOM ---
 function sendMeshComAlert(headline, severity, isRepeat) {
     let sevText = "WARNUNG";
     if (severity === "Extreme") sevText = "LILA";
@@ -127,7 +125,6 @@ function sendMeshComAlert(headline, severity, isRepeat) {
     const prefix = isRepeat ? "(WH) " : "";
     let msgText = `${prefix}NINA ALARM (${sevText}): ${headline}`;
     
-    // APRS / MeshCom Längenlimit beachten (ca. 140 Zeichen)
     if (msgText.length > 140) {
         msgText = msgText.substring(0, 137) + "...";
     }
@@ -138,40 +135,14 @@ function sendMeshComAlert(headline, severity, isRepeat) {
         msg: msgText
     });
 
-    // 1. Nachricht in die Warteschlange packen
-    messageQueue.push({ payload, msgText });
-    
-    // 2. Queue-Verarbeitung anstoßen
-    processQueue();
-}
-
-function processQueue() {
-    // Wenn gerade gesendet wird ODER das Wartezimmer leer ist -> abbrechen
-    if (isSending || messageQueue.length === 0) return;
-
-    isSending = true; // Sende-Sperre aktivieren
-    const nextMessage = messageQueue.shift(); // Älteste Nachricht holen
-
     if (mqttClient.connected) {
-        mqttClient.publish(MQTT_TOPIC, nextMessage.payload);
-        console.log(`\n📻 ---> MESHCOM FUNKSPRUCH: ${nextMessage.msgText}`);
-        
-        if (messageQueue.length > 0) {
-            console.log(`⏳ Funk-Bremse: Warte ${TX_DELAY / 1000} Sekunden. Noch ${messageQueue.length} Warnung(en) im Wartezimmer...`);
-        } else {
-            console.log(`✅ Alle Warnungen aus der Warteschlange erfolgreich gesendet!\n`);
-        }
+        mqttClient.publish(MQTT_TOPIC, payload);
+        console.log(`\n📻 ---> MESHCOM FUNKSPRUCH: ${msgText}\n`);
     } else {
         console.warn("⚠️ Konnte nicht funken: MQTT Broker nicht verbunden.");
     }
-
-    // Nach 5 Sekunden die Sperre aufheben und die nächste Nachricht durchlassen
-    setTimeout(() => {
-        isSending = false;
-        processQueue();
-    }, TX_DELAY);
 }
-// --------------------------------------------------------
+// --------------------------------------
 
 async function fetchAllGermany() {
     console.log(`[${new Date().toLocaleTimeString('de-DE')}] NINA API Abfrage gestartet...`);
@@ -247,6 +218,7 @@ async function fetchAllGermany() {
                         } else {
                             const lastSentTime = notifiedWarnings.get(warn_id);
                             
+                            // Hier greift jetzt dynamisch REPEAT_INTERVAL (60 Sek vs 60 Min)
                             if (now - lastSentTime >= REPEAT_INTERVAL) {
                                 notifiedWarnings.set(warn_id, now);
                                 sendMeshComAlert(headline, severity, true); 

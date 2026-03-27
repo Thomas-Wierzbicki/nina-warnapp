@@ -55,6 +55,12 @@ MQTT_TOPIC=meshcom/tx
 # 3 = Ab ROT (Severe / Hoch) -> Standard für Unwetter/MoWaS
 # 4 = Nur LILA (Extreme) -> Nur bei absoluten Katastrophen
 MQTT_MIN_LEVEL=3
+
+# --- TEST MODUS ---
+# true = Funkt SOFORT beim Start und wiederholt jede Minute (Spam-Gefahr!)
+# false = Normaler Betrieb (Wiederholung alle 60 Minuten)
+TEST_MODE=true
+
 4. Server starten
 
 Bash
