@@ -1,0 +1,73 @@
+#System updaten
+#entweder als Root User oder per sudo
+
+apt update
+apt upgrade
+
+#curl und Git nachinstallieren
+
+apt install curl
+apt install git
+
+#node.js installieren
+
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+
+# in lieu of restarting the shell
+
+\. "$HOME/.nvm/nvm.sh"
+# Download and install Node.js:
+
+nvm install 24
+
+# Verify the Node.js version:
+
+node -v 
+
+# Should print "v24.14.1".
+
+# Verify npm version:
+
+npm -v # Should print "11.11.0".
+
+#NINA-WarnApp installiern
+
+git clone https://github.com/Thomas-Wierzbicki/nina-warnapp.git
+
+#ins NINA-WarnApp Verzeichnis wechseln
+
+npm install
+
+#Erstelle eine Datei mit dem Namen .env, diese enthält die lokale Konfiguration:
+
+
+# .env - Konfiguration der NINA Warnapp
+PORT=3002
+
+
+# --- MESHCOM / MQTT KONFIGURATION ---
+# Adresse des MQTT Brokers (z.B. mqtt://192.168.188.50 oder mqtt://127.0.0.1)
+MQTT_BROKER=mqtt://127.0.0.1
+
+# Das Topic, auf dem gesendet werden soll
+MQTT_TOPIC=meshcom/tx
+
+# Ab welcher Warnstufe soll gefunkt werden?
+# 1 = Ab GELB (Minor / Gering) -> Achtung: Spam-Gefahr!
+# 2 = Ab ORANGE (Moderate / Mittel) -> Gut für Gewitter
+# 3 = Ab ROT (Severe / Hoch) -> Standard für Unwetter/MoWaS
+# 4 = Nur LILA (Extreme) -> Nur bei absoluten Katastrophen
+MQTT_MIN_LEVEL=1
+
+
+#Server starten
+
+npm start
+
+#Server ist jetzt auf Port 3002 erreichbar
+
+http://IP.MEINES.SERVERS.xxxx:3002
+
+
+Inhalt von

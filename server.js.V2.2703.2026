@@ -1,38 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const mqtt = require('mqtt');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-
-// --- EINSTELLUNGEN AUS DER .ENV DATEI LADEN ---
-const MQTT_BROKER = process.env.MQTT_BROKER || "mqtt://127.0.0.1";
-const MQTT_TOPIC = process.env.MQTT_TOPIC || "meshcom/tx";
-const MQTT_MIN_LEVEL = parseInt(process.env.MQTT_MIN_LEVEL) || 3; 
-// ----------------------------------------------
-
-// --- MQTT CLIENT STARTEN ---
-const mqttClient = mqtt.connect(MQTT_BROKER);
-
-mqttClient.on('connect', () => {
-    console.log(`📡 Mit MQTT Broker verbunden (${MQTT_BROKER})`);
-    console.log(`📻 Funk-Alarm aktiviert ab Stufe: ${MQTT_MIN_LEVEL} (Topic: ${MQTT_TOPIC})`);
-    // --- MANUELLER TEST-FUNKSPRUCH ---
-    const testPayload = JSON.stringify({
-        type: "msg",
-        dst: "*", 
-        msg: "TEST: NINA Leitstelle an MeshCom. System einsatzbereit!"
-    });
-    mqttClient.publish(MQTT_TOPIC, testPayload);
-    console.log(`\n📻 ---> TEST-FUNKSPRUCH AN MESHCOM GESENDET!\n`);
-    // ---------------------------------
-});
-
-mqttClient.on('error', (err) => {
-    console.warn(`⚠️ MQTT Verbindungsfehler:`, err.message);
-});
-// ---------------------------
 
 const ENDPOINTS = [
     "https://nina.api.proxy.bund.dev/api31/mowas/mapData.json",
@@ -55,8 +26,6 @@ const POLL_INTERVAL = 300 * 1000;
 
 let currentWarningsData = {};     
 let warningDetailsCache = {}; 
-let notifiedWarnings = new Set(); 
-let isFirstRun = true; 
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -65,6 +34,7 @@ app.get('/nina_current.json', (req, res) => {
     let filteredData = {};
     
     for (const [state, warnings] of Object.entries(currentWarningsData)) {
+        // HIER WIRD NICHTS MEHR WEGGEWORFEN! 
         filteredData[state] = warnings.filter(w => {
             const sev = w.payload?.data?.severity || "Unknown";
             const weight = severityWeights[sev] !== undefined ? severityWeights[sev] : 0;
@@ -110,42 +80,12 @@ function parsePolygons(infoData) {
     return polygons;
 }
 
-// --- FUNKTION ZUM SENDEN AN MESHCOM ---
-function sendMeshComAlert(headline, severity, state) {
-    // Farbe für den Funkspruch übersetzen
-    let sevText = "WARNUNG";
-    if (severity === "Extreme") sevText = "LILA";
-    else if (severity === "Severe") sevText = "ROT";
-    else if (severity === "Moderate") sevText = "ORANGE";
-    else if (severity === "Minor") sevText = "GELB";
-
-    let msgText = `NINA ALARM (${sevText}): ${headline}`;
-    
-    // APRS Limit beachten
-    if (msgText.length > 140) {
-        msgText = msgText.substring(0, 137) + "...";
-    }
-
-    const payload = JSON.stringify({
-        type: "msg",
-        dst: "*", 
-        msg: msgText
-    });
-
-    if (mqttClient.connected) {
-        mqttClient.publish(MQTT_TOPIC, payload);
-        console.log(`\n📻 ---> MESHCOM FUNKSPRUCH GESENDET: ${msgText}\n`);
-    } else {
-        console.warn("⚠️ Konnte nicht funken: MQTT Broker nicht verbunden.");
-    }
-}
-// --------------------------------------
-
 async function fetchAllGermany() {
     console.log(`[${new Date().toLocaleTimeString('de-DE')}] NINA API Abfrage gestartet...`);
     let rawStatus = {};
     let currentKeys = new Set();
     
+    // NEU: Schönerer Name für Warnungen ohne klares Bundesland
     Object.values(STATE_MAPPING).forEach(state => rawStatus[state] = []);
     rawStatus["Überregional / Ohne genaue Ortsangabe"] = [];
     
@@ -175,7 +115,7 @@ async function fetchAllGermany() {
                     
                     let description = "Keine Details verfügbar.";
                     let polygons = [];
-                    let sentDate = ""; 
+                    let sentDate = ""; // Hier speichern wir das Datum
 
                     if (warningDetailsCache[warn_id]) {
                         description = warningDetailsCache[warn_id].description;
@@ -191,29 +131,17 @@ async function fetchAllGermany() {
                                 
                                 description = info.description || info.headline || "Bitte die NINA-App für Details prüfen.";
                                 polygons = parsePolygons(infoArray);
+                                
+                                // NEU: Datum verlässlich aus der Detail-API ziehen!
                                 sentDate = detailData.sent || info.onset || info.effective || warning.sent || "";
                                 
                                 warningDetailsCache[warn_id] = { description, polygons, sent: sentDate };
                             }
                         } catch (err) {
-                            // Ignorieren
+                            console.warn(`Detail-Text für ${warn_id} konnte nicht geladen werden.`);
                         }
                     }
                     currentKeys.add(warn_id);
-
-                    // --- NEU: DYNAMISCHE MESHCOM ALARM LOGIK ---
-                    const currentWeight = severityWeights[severity] || 0;
-                    
-                    if (currentWeight >= MQTT_MIN_LEVEL) {
-                        if (!notifiedWarnings.has(warn_id)) {
-                            notifiedWarnings.add(warn_id);
-                            // Beim ersten Start nichts funken, nur merken!
-                            if (!isFirstRun) {
-                                sendMeshComAlert(headline, severity, state_name);
-                            }
-                        }
-                    }
-                    // -------------------------------------------
 
                     rawStatus[state_name].push({
                         id: warn_id,
@@ -229,10 +157,7 @@ async function fetchAllGermany() {
     }
     
     for (const key in warningDetailsCache) {
-        if (!currentKeys.has(key)) {
-            delete warningDetailsCache[key];
-            notifiedWarnings.delete(key);
-        }
+        if (!currentKeys.has(key)) delete warningDetailsCache[key];
     }
 
     let deduplicatedStatus = {};
@@ -268,8 +193,6 @@ async function fetchAllGermany() {
 
     currentWarningsData = deduplicatedStatus;
     console.log(`[${new Date().toLocaleTimeString('de-DE')}] ${totalRawWarnings} Roh-Warnungen geladen und zu ${totalSummarizedWarnings} kompakten Warnungen zusammengefasst.`);
-    
-    isFirstRun = false;
 }
 
 fetchAllGermany();
