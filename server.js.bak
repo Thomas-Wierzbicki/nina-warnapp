@@ -63,16 +63,6 @@ let isFirstRun = true;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/api/config', (req, res) => {
-    res.json({ 
-        STATION: process.env.STATION_ID || "DA1TWD", 
-        BROKER: MQTT_BROKER, 
-        MIN_LEVEL: MQTT_MIN_LEVEL, 
-        TEST: TEST_MODE, 
-        DUTY: process.env.DUTY_LIMIT || "AUTO" 
-    });
-});
-
 app.get('/nina_current.json', (req, res) => {
     const minLevel = parseInt(req.query.minLevel) || 2; 
     let filteredData = {};
