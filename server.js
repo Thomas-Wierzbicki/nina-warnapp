@@ -12,6 +12,9 @@ const MQTT_TOPIC = process.env.MQTT_TOPIC || "meshcom/tx";
 const MQTT_MIN_LEVEL = parseInt(process.env.MQTT_MIN_LEVEL) || 3; 
 const TEST_MODE = process.env.TEST_MODE === 'true';
 const DUTY_LIMIT = process.env.DUTY_LIMIT || "AUTO"; // <-- Hier ist das neue Duty Limit
+const CALL_DST = process.env.CALL_DST || "NOCALL"
+
+
 // ----------------------------------------------
 
 // Dynamische Zeiten basierend auf dem Modus
@@ -69,7 +72,8 @@ app.get('/api/config', (req, res) => {
         BROKER: MQTT_BROKER, 
         MIN_LEVEL: MQTT_MIN_LEVEL, 
         TEST: TEST_MODE, 
-        DUTY: process.env.DUTY_LIMIT || "AUTO" 
+        DUTY: process.env.DUTY_LIMIT || "AUTO" ,
+	CALL: process.env.CALL_DST || "NOCALL"
     });
 });
 

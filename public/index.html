@@ -171,6 +171,7 @@
                     <div><span style="color: #ffc107;">TX_LVL:</span> ${data.MIN_LEVEL || 3}</div>
                     <div><span style="color: #ffc107;">TEST:</span> ${data.TEST ? '<span style="color: #dc3545;">AKTIV</span>' : '<span style="color: #198754;">Inaktiv</span>'}</div>
                     <div><span style="color: #ffc107;">DUTY:</span> ${data.DUTY || 'AUTO'}</div>
+		    <div><span style="color: #ffc107;">CALL:</span> ${data.CALL || 'NOCALL'}</div>
                 `;
             }).catch(e => {
                 document.getElementById('configDetails').innerHTML = "Config API nicht erreichbar.";
