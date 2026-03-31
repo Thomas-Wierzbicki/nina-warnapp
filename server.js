@@ -147,7 +147,7 @@ function sendMeshComAlert(headline, severity, isRepeat) {
 
     const payload = JSON.stringify({
         type: "msg",
-        dst: "*", 
+        dst: CALL_DST, 
         msg: msgText
     });
 
