@@ -1,0 +1,231 @@
+require('dotenv').config();
+const express = require('express');
+const path = require('path');
+const mqtt = require('mqtt');
+const axios = require('axios'); 
+const cors = require('cors');   
+
+const app = express();
+const PORT = process.env.PORT || 3002;
+
+app.use(cors());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// --- EINSTELLUNGEN ---
+const MQTT_BROKER = process.env.MQTT_BROKER || "mqtt://127.0.0.1";
+const MQTT_TOPIC = process.env.MQTT_TOPIC || "meshcom/tx";
+const MQTT_MIN_LEVEL = parseInt(process.env.MQTT_MIN_LEVEL) || 1; 
+const TEST_MODE = process.env.TEST_MODE === 'true';
+const DUTY_LIMIT = process.env.DUTY_LIMIT || "AUTO"; 
+const CALL_DST = process.env.CALL_DST || "NOCALL";
+
+const POLL_INTERVAL = TEST_MODE ? (60 * 1000) : (300 * 1000); 
+const REPEAT_INTERVAL = TEST_MODE ? (60 * 1000) : (60 * 60 * 1000); 
+
+const mqttClient = mqtt.connect(MQTT_BROKER);
+
+const ENDPOINTS = [
+    "https://warnung.bund.de/api31/mowas/mapData.json",
+    "https://warnung.bund.de/api31/katwarn/mapData.json",
+    "https://warnung.bund.de/api31/biwapp/mapData.json",
+    "https://warnung.bund.de/api31/dwd/mapData.json"
+];
+
+const STATE_MAPPING = {
+    "BW": "Baden-Württemberg", "BY": "Bayern", "BE": "Berlin",
+    "BB": "Brandenburg", "HB": "Bremen", "HH": "Hamburg",
+    "HE": "Hessen", "MV": "Mecklenburg-Vorpommern", "NI": "Niedersachsen",
+    "NW": "Nordrhein-Westfalen", "RP": "Rheinland-Pfalz", "SL": "Saarland",
+    "SN": "Sachsen", "ST": "Sachsen-Anhalt", "SH": "Schleswig-Holstein",
+    "TH": "Thüringen", "DE": "Deutschlandweit"
+};
+
+const severityWeights = { "Extreme": 4, "Severe": 3, "Moderate": 2, "Minor": 1, "Unknown": 0 };
+
+let currentWarningsData = {};     
+let warningDetailsCache = {}; 
+let notifiedWarnings = new Map(); 
+let isFirstRun = true; 
+
+// --- FRONTEND ROUTE (MIT ANTI-CACHE SCHUTZ) ---
+app.get('/nina_current.json', (req, res) => {
+    // Verhindert, dass der Browser alte, leere Daten anzeigt!
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    
+    const minLevel = parseInt(req.query.minLevel) || 1; 
+    let filteredData = {};
+    
+    for (const [state, warnings] of Object.entries(currentWarningsData)) {
+        const filtered = warnings.filter(w => {
+            const weight = severityWeights[w.severity] || 0;
+            return weight >= minLevel;
+        });
+        if (filtered.length > 0) filteredData[state] = filtered;
+    }
+    res.json(filteredData);
+});
+
+// --- HELPER: POLYGONS ---
+function parsePolygons(infoData) {
+    let polygons = [];
+    let infoArray = Array.isArray(infoData) ? infoData : (infoData ? [infoData] : []);
+    infoArray.forEach(info => {
+        if (info.area && Array.isArray(info.area)) {
+            info.area.forEach(area => {
+                if (area.polygon) {
+                    let polyArray = Array.isArray(area.polygon) ? area.polygon : [area.polygon];
+                    polyArray.forEach(polyStr => {
+                        if (typeof polyStr !== 'string') return;
+                        const coords = [];
+                        polyStr.trim().split(/\s+/).forEach(pair => {
+                            const parts = pair.split(',');
+                            if (parts.length === 2) {
+                                const lat = parseFloat(parts[0]);
+                                const lon = parseFloat(parts[1]);
+                                if (!isNaN(lat) && !isNaN(lon)) coords.push([lat, lon]);
+                            }
+                        });
+                        if (coords.length >= 3) polygons.push(coords);
+                    });
+                }
+            });
+        }
+    });
+    return polygons;
+}
+
+// --- MESHCOM LOGIK ---
+let messageQueue = []; 
+let isSending = false; 
+
+function sendMeshComAlert(headline, severity, isRepeat) {
+    let sevText = "WARNUNG";
+    if (severity === "Extreme") sevText = "LILA";
+    else if (severity === "Severe") sevText = "ROT";
+    else if (severity === "Moderate") sevText = "ORANGE";
+    else if (severity === "Minor") sevText = "GELB";
+
+    const msgText = `${isRepeat ? '(WH) ' : ''}NINA (${sevText}): ${headline}`.substring(0, 140);
+    const payload = JSON.stringify({ type: "msg", dst: CALL_DST, msg: msgText });
+    messageQueue.push({ payload, msgText });
+    processQueue();
+}
+
+function processQueue() {
+    if (isSending || messageQueue.length === 0 || !mqttClient.connected) return;
+    isSending = true; 
+    const next = messageQueue.shift(); 
+    mqttClient.publish(MQTT_TOPIC, next.payload);
+    console.log(`📻 ---> FUNKSPRUCH: ${next.msgText}`);
+    
+    const waitTime = (DUTY_LIMIT === "AUTO") ? Math.max(5000, next.msgText.length * 100) : (parseInt(DUTY_LIMIT) || 5000);
+    setTimeout(() => { isSending = false; processQueue(); }, waitTime);
+}
+
+// --- HAUPTFUNKTION ---
+async function fetchAllGermany() {
+    console.log(`\n[${new Date().toLocaleTimeString('de-DE')}] NINA API Abfrage gestartet...`);
+    let rawStatus = {};
+    let currentKeys = new Set();
+    Object.values(STATE_MAPPING).forEach(s => rawStatus[s] = []);
+    rawStatus["Überregional / Ohne genaue Ortsangabe"] = [];
+    
+    let totalRaw = 0;
+
+    for (const url of ENDPOINTS) {
+        try {
+            const response = await axios.get(url, { timeout: 10000 });
+            const warnings = response.data;
+            
+            if (!Array.isArray(warnings)) continue;
+
+            for (const warning of warnings) {
+                // ROBUSTE ID: Falls die DWD-Schnittstelle andere Formate schickt
+                const warn_id = warning.id || warning.identifier || `unknown-${Math.random()}`;
+
+                let state_name = "Überregional / Ohne genaue Ortsangabe";
+                if (warn_id.includes("DE-")) {
+                    const code = warn_id.split("DE-")[1]?.substring(0, 2);
+                    state_name = STATE_MAPPING[code] || state_name;
+                }
+
+                // DATEN LADEN
+                const headline = warning.i18nTitle?.de || warning.headline || "Warnung";
+                const severity = warning.severity || "Minor";
+                
+                let description = warning.i18nTitle?.de || "Keine Details verfügbar.";
+                let polygons = [];
+
+                if (warningDetailsCache[warn_id]) {
+                    description = warningDetailsCache[warn_id].description;
+                    polygons = warningDetailsCache[warn_id].polygons;
+                } else {
+                    try {
+                        const dRes = await axios.get(`https://warnung.bund.de/api31/warnings/${warn_id}.json`, { timeout: 5000 });
+                        const dData = dRes.data;
+                        const infoArray = dData.info || (Array.isArray(dData) ? dData[0].info : []);
+                        const info = infoArray[0] || {};
+                        
+                        description = info.description || info.headline || headline;
+                        polygons = parsePolygons(infoArray);
+                        warningDetailsCache[warn_id] = { description, polygons };
+                    } catch (err) {}
+                }
+                currentKeys.add(warn_id);
+
+                // FUNK-AUSLÖSUNG
+                const weight = severityWeights[severity] || 0;
+                if (weight >= MQTT_MIN_LEVEL) {
+                    const last = notifiedWarnings.get(warn_id);
+                    if (!last || (Date.now() - last >= REPEAT_INTERVAL)) {
+                        notifiedWarnings.set(warn_id, Date.now());
+                        if (TEST_MODE || !isFirstRun) sendMeshComAlert(headline, severity, !!last);
+                    }
+                }
+
+                // FRONTEND AUFBEREITUNG
+                rawStatus[state_name].push({
+                    id: warn_id,
+                    severity: severity, 
+                    payload: { data: { headline, severity, description } },
+                    polygons: polygons 
+                });
+                totalRaw++;
+            }
+        } catch (error) { 
+            // Stille Fehlerunterdrückung für einzelne Endpunkte
+        }
+    }
+    
+    for (const key in warningDetailsCache) {
+        if (!currentKeys.has(key)) { delete warningDetailsCache[key]; notifiedWarnings.delete(key); }
+    }
+
+    // Deduplizierung
+    let deduplicated = {};
+    let totalComp = 0;
+    for (const state in rawStatus) {
+        let unique = new Map();
+        rawStatus[state].forEach(w => {
+            const key = w.payload.data.headline;
+            if (unique.has(key)) {
+                if (w.polygons && w.polygons.length > 0) unique.get(key).polygons.push(...w.polygons);
+            } else {
+                unique.set(key, { ...w });
+            }
+        });
+        deduplicated[state] = Array.from(unique.values());
+        totalComp += deduplicated[state].length;
+    }
+
+    currentWarningsData = deduplicated;
+    isFirstRun = false;
+    console.log(`[*] ${totalRaw} Roh-Warnungen geladen und zu ${totalComp} kompakten zusammengefasst.`);
+}
+
+setInterval(fetchAllGermany, POLL_INTERVAL);
+fetchAllGermany();
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚨 NINA Leitstelle läuft auf Port ${PORT}`);
+});
