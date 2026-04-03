@@ -51,8 +51,9 @@
         .config-hover-card {
             display: none; position: absolute; right: 0; top: 100%; margin-top: 10px;
             background: rgba(30, 30, 30, 0.95); border: 1px solid #555;
-            border-radius: 8px; padding: 15px; width: 220px; z-index: 1000;
+            border-radius: 8px; padding: 15px; width: 240px; z-index: 1000;
             box-shadow: 0 10px 30px rgba(0,0,0,0.8); font-family: monospace;
+            text-align: left;
         }
         .config-badge:hover .config-hover-card { display: block; }
         .btn-config { background: #444; color: #fff; border: 1px solid #666; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
@@ -77,6 +78,10 @@
         .card h3 { margin: 0 0 10px 0; font-size: 1.1rem; }
         .badge { font-size: 0.75rem; font-weight: bold; padding: 2px 6px; border-radius: 3px; background: #333; }
 
+        .tx-status { font-size: 0.7rem; margin-top: 5px; font-weight: bold; }
+        .status-active { color: #4caf50; }
+        .status-inactive { color: #757575; }
+
         .description {
             font-size: 0.9rem; line-height: 1.4; color: #bbb;
             max-height: 75px; overflow: hidden; position: relative;
@@ -86,7 +91,6 @@
             content: ""; position: absolute; bottom: 0; left: 0; width: 100%; height: 25px;
             background: linear-gradient(transparent, var(--card-bg));
         }
-        .card:hover .description::after { background: linear-gradient(transparent, #252525); }
 
         /* --- MODAL WINDOW --- */
         .modal {
@@ -99,7 +103,6 @@
             max-height: 80vh; overflow-y: auto; position: relative;
         }
         .close-modal { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
-        .close-modal:hover { color: #fff; }
         #modalBody { line-height: 1.6; white-space: pre-wrap; color: #eee; font-size: 1rem; }
 
         .all-clear { text-align: center; padding: 40px; color: #4caf50; font-size: 1.2rem; }
@@ -144,31 +147,38 @@
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
         const markersLayer = L.layerGroup().addTo(map);
 
-        let lastData = null; // Speicher für lokales Filtern
+        let lastData = null;
+        let serverConfig = {};
 
-        // Regenradar (RainViewer API)
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                serverConfig = await res.json();
+                document.getElementById('configDetails').innerHTML = `
+                    <div style="color:#ffc107; margin-bottom:5px; border-bottom:1px solid #555;">System-Status</div>
+                    <b>ID:</b> ${serverConfig.STATION || 'DA1TWD'}<br>
+                    <b>CALL:</b> ${serverConfig.CALL || '9'}<br>
+                    <b>TX-LVL:</b> ${serverConfig.MIN_LEVEL || 1}<br>
+                    <b>MODE:</b> ${serverConfig.TEST ? 'TEST' : 'NORMAL'}<br>
+                    <div style="color:#ffc107; margin-top:5px; border-top:1px solid #555; font-size:0.75rem;">
+                        <b>HOME_ARS:</b><br>
+                        <span style="color:#aaa; word-break: break-all;">${serverConfig.HOME_ARS_RAW || '🌍 Global'}</span>
+                    </div>
+                `;
+            } catch (e) { 
+                document.getElementById('configDetails').innerText = "Config Offline"; 
+            }
+        }
+
         async function loadRadar() {
             try {
                 const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
                 const data = await res.json();
                 const latest = data.radar.past[data.radar.past.length - 1];
-                L.tileLayer(`https://tilecache.rainviewer.com${latest.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: 0.4 }).addTo(map);
-            } catch (e) { console.error("Radar Fehler"); }
+                L.tileLayer(`https://tilecache.rainviewer.com${latest.path}/256/{z}/{x}/{y}/2/1_1.png`, { opacity: 0.35 }).addTo(map);
+            } catch (e) { }
         }
-        loadRadar();
 
-        // Config Hover Daten
-        fetch('/api/config').then(res => res.json()).then(data => {
-            document.getElementById('configDetails').innerHTML = `
-                <div style="color:#ffc107; margin-bottom:5px; border-bottom:1px solid #555;">System</div>
-                ID: ${data.STATION || 'DA1TWD'}<br>
-                CALL: ${data.CALL || '9'}<br>
-                TX-LVL: ${data.MIN_LEVEL || 1}<br>
-                MODE: ${data.TEST ? 'TEST' : 'NORMAL'}
-            `;
-        }).catch(() => document.getElementById('configDetails').innerText = "Config Offline");
-
-        // Hilfsfunktion zum Säubern von HTML-Tags
         function cleanHTML(raw) {
             if(!raw) return "";
             let text = raw.replace(/<br\s*\/?>/gi, '\n'); 
@@ -182,44 +192,68 @@
             return levels[s] || 0;
         }
 
+        function isTransmitted(w) {
+            const level = getSevLevel(w.severity);
+            if (level < serverConfig.MIN_LEVEL) return false;
+            
+            if (!serverConfig.HOME_ARS_RAW) return true; 
+
+            const homeList = serverConfig.HOME_ARS_RAW.split(',').map(s => s.trim());
+            const warningArsList = w.rawArsString ? w.rawArsString.split(',').map(s => s.trim()) : [];
+            
+            return warningArsList.some(wArs => {
+                const wArsKreis = wArs.substring(0, 5);
+                return homeList.some(hArs => hArs === wArs || hArs.startsWith(wArsKreis));
+            });
+        }
+
         async function updateData() {
             try {
+                await loadConfig();
                 const res = await fetch('/nina_current.json?t=' + Date.now());
                 lastData = await res.json();
                 document.getElementById('last-update').innerText = `Update: ${new Date().toLocaleTimeString()} Uhr`;
                 renderDashboard();
-            } catch (e) { document.getElementById('last-update').innerText = "⚠️ Server Fehler"; }
+            } catch (e) { }
         }
 
         function renderDashboard() {
             if (!lastData) return;
             const dashboard = document.getElementById('dashboard');
-            const minLevel = parseInt(document.getElementById('severity-filter').value);
+            const filterLevel = parseInt(document.getElementById('severity-filter').value);
             
             dashboard.innerHTML = '';
             markersLayer.clearLayers();
             let total = 0;
 
             for (const [region, warnings] of Object.entries(lastData)) {
-                // Filtern
-                const filtered = warnings.filter(w => getSevLevel(w.severity) >= minLevel);
+                const filtered = warnings.filter(w => getSevLevel(w.severity) >= filterLevel);
                 if (filtered.length === 0) continue;
                 total += filtered.length;
 
                 const section = document.createElement('div');
                 section.className = 'state-section';
                 section.innerHTML = `<div class="state-title">${region}</div>`;
-                
                 const grid = document.createElement('div');
                 grid.className = 'grid';
 
                 filtered.forEach(w => {
                     const cleanText = cleanHTML(w.description);
+                    const isTX = isTransmitted(w);
 
                     if (w.coords) {
-                        L.circleMarker([w.coords.lat, w.coords.lon], {
-                            radius: 9, fillColor: getHex(w.severity), color: "#fff", weight: 1, fillOpacity: 0.8
-                        }).addTo(markersLayer).bindPopup(`<b>${w.title}</b><br>${region}`);
+                        const markerOptions = {
+                            radius: isTX ? 10 : 7, 
+                            fillColor: getHex(w.severity),
+                            color: isTX ? "#fff" : getHex(w.severity),
+                            weight: isTX ? 3 : 1,
+                            fillOpacity: isTX ? 0.9 : 0.3,
+                            dashArray: isTX ? null : "5, 5"
+                        };
+
+                        L.circleMarker([w.coords.lat, w.coords.lon], markerOptions)
+                            .addTo(markersLayer)
+                            .bindPopup(`<b>${w.title}</b><br>Funk-Status: ${isTX ? '📡 GESENDET' : '⚪ Nur Dashboard'}`);
                     }
 
                     const card = document.createElement('div');
@@ -230,7 +264,10 @@
                             <h3>${w.title}</h3>
                             <span class="badge" style="color:${getHex(w.severity)}">${w.severity}</span>
                         </div>
-                        <div style="font-size:0.75rem; color:#888; margin-bottom:10px;">${w.date}</div>
+                        <div class="tx-status ${isTX ? 'status-active' : 'status-inactive'}">
+                            ${isTX ? '📡 MeshCom: Aktiv' : '⚪ MeshCom: Gefiltert'}
+                        </div>
+                        <div style="font-size:0.75rem; color:#888; margin-top:5px;">${w.date}</div>
                         <div class="description">${cleanText}</div>
                     `;
                     grid.appendChild(card);
@@ -239,7 +276,6 @@
                 section.appendChild(grid);
                 dashboard.appendChild(section);
             }
-            if (total === 0) dashboard.innerHTML = '<div class="all-clear">✅ Keine Warnungen für diese Stufe.</div>';
         }
 
         function getHex(s) {
@@ -255,13 +291,11 @@
         }
 
         function closeModal() { document.getElementById('textModal').style.display = "none"; }
-        window.onclick = (e) => { if (e.target == document.getElementById('textModal')) closeModal(); }
         
-        // Event Listener für Filter
         document.getElementById('severity-filter').addEventListener('change', renderDashboard);
-
-        setInterval(updateData, 60000);
+        loadRadar();
         updateData();
+        setInterval(updateData, 60000);
     </script>
 </body>
 </html>
